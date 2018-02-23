@@ -83,24 +83,24 @@ class OxfordInstruments_Kelvinox_IGH(VisaInstrument):
                            get_cmd=self._get_G1)
         self.add_parameter('G2',
                            unit='mbar',
-                           get_cmd=self._get_G1)
+                           get_cmd=self._get_G2)
         self.add_parameter('G3',
                            unit='mbar',
-                           get_cmd=self._get_G1)
+                           get_cmd=self._get_G3)
         self.add_parameter('P1',
                            unit='mbar',
-                           get_cmd=self._get_G1)
+                           get_cmd=self._get_P1)
         self.add_parameter('P2',
                            unit='mbar',
-                           get_cmd=self._get_G1)
+                           get_cmd=self._get_P2)
         self.add_parameter('V6_valve',
                            unit='%',
                            get_cmd=self._get_V6_valve,
                            set_cmd=self._set_V6_valve)
         self.add_parameter('V12A_valve',
                            unit='%',
-                           get_cmd=self._get_V6_valve,
-                           set_cmd=self._set_V6_valve)
+                           get_cmd=self._get_V12A_valve,
+                           set_cmd=self._set_V12A_valve)
         self.add_parameter('still_status',
                            get_cmd=self._get_still_status)
         self.add_parameter('sorb_status',
@@ -111,8 +111,8 @@ class OxfordInstruments_Kelvinox_IGH(VisaInstrument):
                            set_cmd=self._set_still_power)
         self.add_parameter('sorb_temp',
                            unit='K',
-                           get_cmd=self._get_still_power,
-                           set_cmd=self._set_still_power)
+                           get_cmd=self._get_sorb_temp,
+                           set_cmd=self._set_sorb_temp)
         self.add_parameter('remote_status',
                            get_cmd=self._get_remote_status,
                            set_cmd=self._set_remote_status,
@@ -140,6 +140,7 @@ class OxfordInstruments_Kelvinox_IGH(VisaInstrument):
             message (str) : write command for the device
         """
         log.info('Send the following command to the device: %s' % message)
+        print('@%s%s' % (self._number, message))
         self.visa_handle.write('@%s%s' % (self._number, message))
         sleep(70e-3)  # wait for the device to be able to respond
         result = self._read()

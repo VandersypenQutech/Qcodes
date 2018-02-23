@@ -88,6 +88,7 @@ class OxfordInstruments_ILM200(VisaInstrument):
             None
         """
         logging.info(__name__ + ' : Send the following command to the device: %s' % message)
+        print('@%s%s' % (self._number, message))
         self.visa_handle.write('@%s%s' % (self._number, message))
         sleep(70e-3)  # wait for the device to be able to respond
         result = self._read()
