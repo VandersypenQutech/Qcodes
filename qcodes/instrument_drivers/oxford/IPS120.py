@@ -14,6 +14,7 @@ from qcodes import VisaInstrument
 from qcodes import validators as vals
 from time import sleep
 import visa
+import threading
 
 
 log = logging.getLogger(__name__)
@@ -29,7 +30,7 @@ class OxfordInstruments_IPS120(VisaInstrument):
     which is sent to the device starts with '@n', where n is the ISOBUS instrument number.
     """
 
-    def __init__(self, name, address, number=2, **kwargs):
+    def __init__(self, name, address, number=2, lock=threading.lock(), **kwargs):
         """Initializes the Oxford Instruments IPS 120 Magnet Power Supply.
 
         Args:
@@ -169,13 +170,18 @@ class OxfordInstruments_IPS120(VisaInstrument):
         """
         log.info('Send the following command to the device: %s' %
             message)
-        self.visa_handle.write('@%s%s' % (self._number, message))
-        sleep(70e-3)  # wait for the device to be able to respond
-        result = self._read()
-        if result.find('?') >= 0:
-            print("Error: Command %s not recognized" % message)
-        else:
-            return result
+        result = ''
+        max_tries = 10
+        for i in range(max_tries):
+            with self.lock:
+                self.visa_handle.write('@%s%s' % (self._number, message))
+                sleep(70e-3)  # wait for the device to be able to respond
+                result = self._read()
+                if result.find('?') >= 0:
+                    print("Error: Command %s not recognized" % message)
+                break
+            if i + 1 == max_tries:
+                print('Magnet: Could not acquire the lock.')
 
     def _read(self):
         """
