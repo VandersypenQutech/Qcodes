@@ -15,6 +15,7 @@ import numpy
 from qcodes import VisaInstrument
 from qcodes import validators as vals
 from functools import partial
+import threading
 
 
 log = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ class OxfordInstruments_Kelvinox_IGH(VisaInstrument):
     which is sent to the device starts with '@n', where n is the ISOBUS instrument number.
     """
 
-    def __init__(self, name, address, number=5, **kwargs):
+    def __init__(self, name, address, number=5, lock=threading.Lock(), **kwargs):
         """
         Initializes the Oxford Instruments Kelvinox IGH Dilution Refrigerator.
 
@@ -50,6 +51,7 @@ class OxfordInstruments_Kelvinox_IGH(VisaInstrument):
         self._values = {}
         self.visa_handle.set_visa_attribute(visa.constants.VI_ATTR_ASRL_STOP_BITS,
                                             visa.constants.VI_ASRL_STOP_TWO)
+        self.lock = lock
         self._valve_map = {
             1: '9',
             2: '8',
@@ -73,13 +75,17 @@ class OxfordInstruments_Kelvinox_IGH(VisaInstrument):
         }
 
         # Add parameters
-        self.add_parameter('one_K_pot_temp',
-                           unit='K',
-                           get_cmd=self._get_one_K_pot_temp)
         self.add_parameter('mix_chamber_temp',
                            unit='K',
                            get_cmd=self._get_mix_chamber_temp,
                            set_cmd=self._set_mix_chamber_temp)
+        self.add_parameter('one_K_pot_temp',
+                           unit='K',
+                           get_cmd=self._get_one_K_pot_temp)
+        self.add_parameter('sorb_temp',
+                           unit='K',
+                           get_cmd=self._get_sorb_temp,
+                           set_cmd=self._set_sorb_temp)
         self.add_parameter('G1',
                            unit='mbar',
                            get_cmd=self._get_G1)
@@ -111,10 +117,10 @@ class OxfordInstruments_Kelvinox_IGH(VisaInstrument):
                            unit='mW',
                            get_cmd=self._get_still_power,
                            set_cmd=self._set_still_power)
-        self.add_parameter('sorb_temp',
-                           unit='K',
-                           get_cmd=self._get_sorb_temp,
-                           set_cmd=self._set_sorb_temp)
+        self.add_parameter('sorb_power',
+                           unit='mW',
+                           get_cmd=self._get_sorb_power,
+                           set_cmd=self._set_sorb_power)
         self.add_parameter('remote_status',
                            get_cmd=self._get_remote_status,
                            set_cmd=self._set_remote_status,
@@ -143,13 +149,20 @@ class OxfordInstruments_Kelvinox_IGH(VisaInstrument):
             message (str) : write command for the device
         """
         log.info('Send the following command to the device: %s' % message)
-        self.visa_handle.write('@%s%s' % (self._number, message))
-        sleep(70e-3)  # wait for the device to be able to respond
-        result = self._read()
-        if result.find('?') >= 0:
-            print("Error: Command %s not recognized" % message)
-        else:
-            return result
+        result = ''
+        max_tries = 10
+        for i in range(max_tries):
+            with self.lock:
+                self.visa_handle.write('@%s%s' % (self._number, message))
+                sleep(70e-3)  # wait for the device to be able to respond
+                result = self._read()
+                if result.find('?') >= 0:
+                    print("Error: Command %s not recognized" % message)
+                break
+            if i + 1 == max_tries:
+                print('Fridge: Could not acquire the lock.')
+        
+        return result
 
     def _read(self):
         """
@@ -270,17 +283,6 @@ class OxfordInstruments_Kelvinox_IGH(VisaInstrument):
         result = self._execute('R2')
         return float(result.replace('R', '')) / 1000
 
-    def _get_mix_chamber_temp(self):
-        """
-        Get Mix Chamber Temperature
-
-        Output:
-            result (float) : Mix Chamber Temperature in mK
-        """
-        log.info('Read Mix Chamber Temperature')
-        result = self._execute('R3')
-        return 1e-3 * float(result.replace('R', ''))
-
     def set_mix_chamber_heater_mode(self, mode):
         """
         0 : off
@@ -300,6 +302,17 @@ class OxfordInstruments_Kelvinox_IGH(VisaInstrument):
         """
         log.info('Setting Mix Chamber Power range')
         self._execute('E%i' % mode)
+
+    def _get_mix_chamber_temp(self):
+        """
+        Get Mix Chamber Temperature
+
+        Output:
+            result (float) : Mix Chamber Temperature in mK
+        """
+        log.info('Read Mix Chamber Temperature')
+        result = self._execute('R3')
+        return 1e-3 * float(result.replace('R', ''))
 
     def _set_mix_chamber_temp(self, temperature):
         """
@@ -482,7 +495,7 @@ class OxfordInstruments_Kelvinox_IGH(VisaInstrument):
         return val_mapping[int(still_status)]
 
     def _get_sorb_status(self):
-        """ get the status of the still (on/off)"""
+        """ get the status of the sorb (on/off)"""
         status = self._get_still_sorb_status()
         if (status == 'O0') | (status == 'O1'):
             sorb_status = 0
@@ -492,12 +505,6 @@ class OxfordInstruments_Kelvinox_IGH(VisaInstrument):
             sorb_status = 2
         val_mapping = {0: 'off', 1: 'on T control', 2: 'on P control'}
         return val_mapping[sorb_status]
-
-    def _get_still_power(self):
-        """ get the power on the still"""
-        log.info('Read still power')
-        result = self._execute('R5')
-        return float(result.replace('R', '')) / 10
 
     def _get_sorb_temp(self):
         """ get the temperature of the sorb"""
@@ -524,16 +531,22 @@ class OxfordInstruments_Kelvinox_IGH(VisaInstrument):
         self.get_sorb_status()
         self.local()
 
-    def _set_still_power(self, temperature):
-        """ power in mW"""
-        P = round(temperature / 0.1)
+    def _get_still_power(self):
+        """ get the power on the still"""
+        log.info('Read still power')
+        result = self._execute('R5')
+        return float(result.replace('R', '')) / 10
+
+    def _set_still_power(self, power):
+        """ Power in mW"""
+        P = round(power / 0.1)
         status = self._get_still_sorb_status()
         self.remote()
-        if (status == 'O0'):  # turn the sorb ON
+        if (status == 'O0'):
             self._set_still_sorb_status('O1')
-        elif (status == 'O2'):  # turn the sorb ON
+        elif (status == 'O2'):
             self._set_still_sorb_status('O3')
-        elif (status == 'O4'):  # the sorb already on T control
+        elif (status == 'O4'):
             self._set_still_sorb_status('O5')
         else:
             pass
@@ -541,4 +554,26 @@ class OxfordInstruments_Kelvinox_IGH(VisaInstrument):
         log.info('Setting still power')
         self._execute('S%i' % P)
         self._get_still_status()
+        self.local()
+        
+    def _get_sorb_power(self):
+        """ get the power on the sorb"""
+        log.info('Read sorb power')
+        result = self._execute('R6')
+        return float(result.replace('R', ''))
+
+    def _set_sorb_power(self, power):
+        """ Power in mW"""
+        #TODO: Check if sorb is on
+        status = self._get_still_sorb_status()
+        self.remote()
+        if (status == 'O0') | (status == 'O2'):
+            self._set_still_sorb_status('O4')
+        elif (status == 'O3'):
+            self._set_still_sorb_status('O5')
+        else:
+            pass
+
+        log.info('Setting sorb power')
+        self._execute('B%i' % power)
         self.local()

@@ -12,6 +12,7 @@ from time import sleep
 import visa
 import logging
 from qcodes import VisaInstrument
+import threading
 
 
 class OxfordInstruments_ILM200(VisaInstrument):
@@ -28,7 +29,7 @@ class OxfordInstruments_ILM200(VisaInstrument):
 
     """
 
-    def __init__(self, name, address, number=1, **kwargs):
+    def __init__(self, name, address, number=1, lock=threading.Lock(), **kwargs):
         """
         Initializes the Oxford Instruments ILM 200 Helium Level Meter.
 
@@ -48,7 +49,7 @@ class OxfordInstruments_ILM200(VisaInstrument):
         self._address = address
         self._number = number
         self._values = {}
-
+        self.lock = lock
         self.add_parameter('level',
                            label='level',
                            get_cmd=self._do_get_level,
@@ -80,13 +81,20 @@ class OxfordInstruments_ILM200(VisaInstrument):
         """
         logging.info(
             __name__ + ' : Send the following command to the device: %s' % message)
-        self.visa_handle.write('@%s%s' % (self._number, message))
-        sleep(70e-3)  # wait for the device to be able to respond
-        result = self._read()
-        if result.find('?') >= 0:
-            print("Error: Command %s not recognized" % message)
-        else:
-            return result
+        result = ''
+        max_tries = 10
+        for i in range(max_tries):
+            with self.lock:
+                self.visa_handle.write('@%s%s' % (self._number, message))
+                sleep(70e-3)  # wait for the device to be able to respond
+                result = self._read()
+                if result.find('?') >= 0:
+                    print("Error: Command %s not recognized" % message)
+                break
+            if i + 1 == max_tries:
+                print('Helium: Could not acquire the lock.')
+        
+        return result
 
     def _read(self):
         """
