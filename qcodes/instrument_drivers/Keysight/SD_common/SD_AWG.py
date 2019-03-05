@@ -67,7 +67,7 @@ class SD_AWG(SD_Module):
                                docstring='The digital value of pxi trigger no. {}, 0 (ON) of 1 (OFF)'.format(i),
                                vals=validator.Enum(0, 1))
 
-        for i in range(channels):
+        for i in range(1, channels+1):
             self.add_parameter('frequency_channel_{}'.format(i),
                                label='frequency channel {}'.format(i),
                                unit='Hz',
